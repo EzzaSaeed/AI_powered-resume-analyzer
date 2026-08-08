@@ -30,7 +30,7 @@ client = OpenAI(
 )
 
 # You can change this model if it is unavailable on OpenRouter.
-MODEL = "openai/gpt-oss-20b:free"
+MODEL = "google/gemini-2.5-flash"
 
 
 # =========================================================
