@@ -5,6 +5,7 @@ An AI-powered resume analysis tool that evaluates a candidate's resume against a
 
 The application uses LLM-powered analysis, prompt engineering, API integration, and structured JSON validation to turn an unstructured resume into a clear and useful improvement report.
 
+---
 
 🚀 Project Overview
 
@@ -21,7 +22,7 @@ The AI Resume Analyzer solves this problem by allowing users to:
 7. Generate improved versions of resume bullet points.
 8. Download the analysis as a JSON file.
 
-
+---
 
 ✨ Features
 
@@ -39,7 +40,7 @@ The AI Resume Analyzer solves this problem by allowing users to:
 - ⬇️ Downloadable analysis
 - 🔐 API key stored securely using environment variables
 
-
+---
 
 🧠 AI Workflow
 
@@ -108,35 +109,7 @@ AI-Resume-Analyzer/
 
 ---
 
-⚙️ Installation
 
-1. Clone the repository
-
-git clone https://github.com/YOUR-USERNAME/AI-Resume-Analyzer.git
-
-Move into the project directory:
-
-cd AI-Resume-Analyzer
-
-2. Create a virtual environment
-
-Windows:
-
-python -m venv venv
-
-Activate it:
-
-venv\Scripts\activate
-
-For macOS/Linux:
-
-source venv/bin/activate
-
-3. Install dependencies
-
-pip install -r requirements.txt
-
----
 
 🔑 API Configuration
 
@@ -162,7 +135,7 @@ streamlit run app.py
 
 The application will open in your browser.
 
----
+
 
 🧩 Prompt Engineering
 
@@ -276,15 +249,7 @@ The project uses environment variables for API credentials.
 
 The API key should never be hard-coded into "app.py" or committed to GitHub.
 
-The ".gitignore" file should contain:
 
-.env
-__pycache__/
-*.pyc
-
-Before pushing to GitHub, verify that ".env" is not included in the repository.
-
----
 
 🎯 Learning Outcomes
 
@@ -339,3 +304,5 @@ Ezza Saeed
 
 BS Software Engineering Student
 
+live:
+https://aipowered-resume-analyzer-l9wdhyu27cnxpfpajmyevt.streamlit.app/
