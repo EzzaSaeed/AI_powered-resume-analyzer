@@ -1,130 +1,243 @@
 import os
 import json
+
 import streamlit as st
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from pypdf import PdfReader
 
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
 
 load_dotenv()
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 if not API_KEY:
-    st.error("OPENROUTER_API_KEY is missing. Add it to your .env file.")
+    st.error(
+        "OPENROUTER_API_KEY is missing. "
+        "Add it to Streamlit Secrets or your .env file."
+    )
     st.stop()
+
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=API_KEY
 )
 
-# Change this to an OpenRouter model available to your account.
-MODEL ="openai/gpt-oss-20b:free"
+# You can change this model if it is unavailable on OpenRouter.
+MODEL = "openai/gpt-oss-20b:free"
 
 
-# ---------------------------------------------------------
-# Structured Output Schema
-# ---------------------------------------------------------
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
+st.set_page_config(
+    page_title="AI Resume Analyzer",
+    page_icon="📄",
+    layout="wide"
+)
+
+
+# =========================================================
+# STRUCTURED OUTPUT SCHEMA
+# =========================================================
 
 class ResumeAnalysis(BaseModel):
+
     score: int = Field(
-        description="Overall ATS compatibility score from 0 to 100"
+        ge=0,
+        le=100,
+        description="ATS compatibility score from 0 to 100"
     )
 
     strengths: list[str] = Field(
-        description="Important strengths of the candidate's resume"
+        default_factory=list,
+        description="Strengths found in the resume"
     )
 
     missing_skills: list[str] = Field(
-        description="Skills from the job description that appear to be missing"
+        default_factory=list,
+        description="Skills required by the job but missing from the resume"
     )
 
     weaknesses: list[str] = Field(
+        default_factory=list,
         description="Important weaknesses in the resume"
     )
 
     improvements: list[str] = Field(
-        description="Specific and actionable resume improvements"
+        default_factory=list,
+        description="Specific resume improvement suggestions"
     )
 
     improved_bullets: list[str] = Field(
-        description="Improved versions of weak resume bullet points"
+        default_factory=list,
+        description="Improved versions of resume bullet points"
     )
 
 
-# ---------------------------------------------------------
-# PDF Text Extraction
-# ---------------------------------------------------------
+# =========================================================
+# PDF TEXT EXTRACTION
+# =========================================================
 
 def extract_pdf_text(uploaded_file):
-    """Extract text from an uploaded PDF."""
 
-    reader = PdfReader(uploaded_file)
+    try:
 
-    text = []
+        reader = PdfReader(uploaded_file)
 
-    for page in reader.pages:
-        page_text = page.extract_text()
+        pages_text = []
 
-        if page_text:
-            text.append(page_text)
+        for page in reader.pages:
 
-    return "\n".join(text)
+            page_text = page.extract_text()
+
+            if page_text:
+                pages_text.append(page_text)
+
+        return "\n".join(pages_text).strip()
+
+    except Exception as e:
+
+        st.error(f"Could not read the PDF: {e}")
+
+        return ""
 
 
-# ---------------------------------------------------------
-# AI Resume Analysis
-# ---------------------------------------------------------
+# =========================================================
+# CLEAN AI RESPONSE
+# =========================================================
+
+def clean_json_response(content):
+
+    if not content:
+        raise ValueError("The AI returned an empty response.")
+
+    content = content.strip()
+
+    # Remove markdown JSON code fences
+    if content.startswith("```json"):
+
+        content = content[7:]
+
+    elif content.startswith("```"):
+
+        content = content[3:]
+
+    if content.endswith("```"):
+
+        content = content[:-3]
+
+    content = content.strip()
+
+    # Sometimes models return extra text before/after JSON.
+    # Try to extract the JSON object.
+    first_brace = content.find("{")
+    last_brace = content.rfind("}")
+
+    if first_brace != -1 and last_brace != -1:
+
+        content = content[first_brace:last_brace + 1]
+
+    return content
+
+
+# =========================================================
+# AI RESUME ANALYSIS
+# =========================================================
 
 def analyze_resume(resume_text, job_description):
 
     system_prompt = """
 You are an expert technical recruiter and ATS resume evaluator.
 
-Your task is to analyze a candidate's resume against a job description.
+Your job is to compare a candidate's resume against a target
+job description.
 
 Evaluate:
 
-1. Overall ATS compatibility
+1. ATS compatibility score
 2. Resume strengths
 3. Missing skills
 4. Resume weaknesses
-5. Specific improvements
-6. Improved versions of weak resume bullet points
+5. Specific improvement suggestions
+6. Improved resume bullet points
 
-Important rules:
+IMPORTANT RULES:
 
-- Do not invent experience, education, projects, or skills.
-- Only use information contained in the resume.
-- Compare the resume directly with the job description.
-- Make recommendations specific and actionable.
+- Do NOT invent experience.
+- Do NOT invent projects.
+- Do NOT invent education.
+- Do NOT claim that the candidate has a skill unless it appears
+  in the resume.
+- Base your analysis only on the provided resume and job description.
+- Be useful for students and early-career developers.
+- Keep recommendations specific and actionable.
 - The score must be between 0 and 100.
-- Keep the feedback professional and useful for a student or early-career developer.
+- Return ONLY valid JSON.
+- Do not use Markdown.
+- Do not add explanations outside the JSON object.
 """
 
     user_prompt = f"""
-RESUME:
+Analyze the following resume against the following job description.
+
+========================
+RESUME
+========================
 
 {resume_text}
 
-
-JOB DESCRIPTION:
+========================
+JOB DESCRIPTION
+========================
 
 {job_description}
 
+========================
+REQUIRED JSON FORMAT
+========================
 
-Analyze this resume against the job description.
-Return the result according to the required structured schema.
+Return ONLY a JSON object using exactly these fields:
+
+{{
+    "score": 0,
+    "strengths": [
+        "example"
+    ],
+    "missing_skills": [
+        "example"
+    ],
+    "weaknesses": [
+        "example"
+    ],
+    "improvements": [
+        "example"
+    ],
+    "improved_bullets": [
+        "example"
+    ]
+}}
+
+Make the score an integer between 0 and 100.
 """
+
+    content = ""
 
     try:
 
+        # -------------------------------------------------
+        # OpenRouter API request
+        # -------------------------------------------------
+
         response = client.chat.completions.create(
+
             model=MODEL,
 
             messages=[
@@ -140,134 +253,224 @@ Return the result according to the required structured schema.
 
             temperature=0.2,
 
-            response_format={
-                "type": "json_object"
-            }
+            max_tokens=2500
         )
 
-        content = response.choices[0].message.content
+        # -------------------------------------------------
+        # Extract AI response
+        # -------------------------------------------------
 
-if not content:
-    raise ValueError("The AI returned an empty response.")
+        if not response.choices:
 
-content = content.strip()
+            raise ValueError(
+                "The AI API returned no choices."
+            )
 
-# Remove markdown code fences if the model adds them
-if content.startswith("```json"):
-    content = content[7:]
+        message = response.choices[0].message
 
-if content.startswith("```"):
-    content = content[3:]
+        content = message.content
 
-if content.endswith("```"):
-    content = content[:-3]
+        # -------------------------------------------------
+        # Check empty response
+        # -------------------------------------------------
 
-content = content.strip()
+        if not content:
 
-data = json.loads(content)
+            raise ValueError(
+                "The AI returned an empty response."
+            )
 
-return ResumeAnalysis.model_validate(data)
+        # -------------------------------------------------
+        # Clean response
+        # -------------------------------------------------
+
+        cleaned_content = clean_json_response(content)
+
+        # -------------------------------------------------
+        # Parse JSON
+        # -------------------------------------------------
+
+        data = json.loads(cleaned_content)
+
+        # -------------------------------------------------
+        # Validate with Pydantic
+        # -------------------------------------------------
+
+        result = ResumeAnalysis.model_validate(data)
+
+        return result
+
+    except json.JSONDecodeError as e:
+
+        st.error(
+            f"The AI returned invalid JSON: {e}"
+        )
+
+        with st.expander("Show AI response for debugging"):
+
+            st.code(
+                content if content else "Empty response"
+            )
+
+        return None
 
     except Exception as e:
 
-        st.error(f"AI analysis failed: {e}")
+        st.error(
+            f"AI analysis failed: {e}"
+        )
+
+        with st.expander("Show technical details"):
+
+            st.write(str(e))
+
+            if content:
+
+                st.code(content)
+
         return None
 
 
-# ---------------------------------------------------------
-# Streamlit UI
-# ---------------------------------------------------------
-
-st.set_page_config(
-    page_title="AI Resume Analyzer",
-    page_icon="📄",
-    layout="wide"
-)
+# =========================================================
+# HEADER
+# =========================================================
 
 st.title("📄 AI Resume Analyzer")
 
-st.write(
-    "Analyze your resume against a job description using AI "
-    "and get actionable ATS-focused feedback."
+st.markdown(
+    """
+### Optimize your resume for your target job
+
+Upload your resume and paste a job description to receive
+AI-powered ATS analysis, missing skills, weaknesses,
+improvement suggestions, and improved resume bullets.
+"""
 )
 
 st.divider()
 
 
-# ---------------------------------------------------------
-# Input Section
-# ---------------------------------------------------------
+# =========================================================
+# INPUT SECTION
+# =========================================================
 
-left, right = st.columns(2)
+col1, col2 = st.columns(2)
 
-with left:
+
+with col1:
 
     st.subheader("📎 Upload Resume")
 
     uploaded_file = st.file_uploader(
-        "Upload your resume",
+        "Upload your resume as a PDF",
         type=["pdf"]
     )
 
-with right:
+
+with col2:
 
     st.subheader("💼 Job Description")
 
     job_description = st.text_area(
-        "Paste the job description here",
+        "Paste the target job description",
         height=250,
-        placeholder="Paste the complete job description..."
+        placeholder=(
+            "Example:\n\n"
+            "We are looking for an AI Intern with "
+            "Python, APIs, prompt engineering..."
+        )
     )
 
 
 st.divider()
 
 
-# ---------------------------------------------------------
-# Analyze Button
-# ---------------------------------------------------------
+# =========================================================
+# ANALYZE BUTTON
+# =========================================================
 
-if st.button(
+analyze_button = st.button(
     "🚀 Analyze Resume",
+    type="primary",
     use_container_width=True
-):
+)
+
+
+if analyze_button:
+
+    # -----------------------------------------------------
+    # Validate resume
+    # -----------------------------------------------------
 
     if uploaded_file is None:
 
-        st.warning("Please upload your resume PDF.")
+        st.warning(
+            "Please upload your resume PDF first."
+        )
 
-    elif not job_description.strip():
-
-        st.warning("Please enter the job description.")
-
-    else:
-
-        with st.spinner("Analyzing your resume..."):
-
-            resume_text = extract_pdf_text(uploaded_file)
-
-            if not resume_text.strip():
-
-                st.error(
-                    "Could not extract text from this PDF. "
-                    "Try a text-based PDF."
-                )
-
-            else:
-
-                result = analyze_resume(
-                    resume_text,
-                    job_description
-                )
-
-                if result:
-
-                    st.session_state["analysis"] = result
+        st.stop()
 
 
-# ---------------------------------------------------------
-# Results
-# ---------------------------------------------------------
+    # -----------------------------------------------------
+    # Validate job description
+    # -----------------------------------------------------
+
+    if not job_description.strip():
+
+        st.warning(
+            "Please paste a job description first."
+        )
+
+        st.stop()
+
+
+    # -----------------------------------------------------
+    # Extract resume text
+    # -----------------------------------------------------
+
+    with st.spinner("Reading your resume..."):
+
+        resume_text = extract_pdf_text(
+            uploaded_file
+        )
+
+
+    if not resume_text:
+
+        st.error(
+            "No readable text was found in the PDF. "
+            "Please upload a text-based PDF."
+        )
+
+        st.stop()
+
+
+    # -----------------------------------------------------
+    # Analyze resume
+    # -----------------------------------------------------
+
+    with st.spinner(
+        "AI is analyzing your resume against the job description..."
+    ):
+
+        result = analyze_resume(
+            resume_text,
+            job_description
+        )
+
+
+    # -----------------------------------------------------
+    # Save result
+    # -----------------------------------------------------
+
+    if result:
+
+        st.session_state["analysis"] = result
+
+
+# =========================================================
+# RESULTS
+# =========================================================
 
 if "analysis" in st.session_state:
 
@@ -278,93 +481,190 @@ if "analysis" in st.session_state:
     st.header("📊 Resume Analysis")
 
 
-    # ATS Score
+    # =====================================================
+    # SCORE
+    # =====================================================
 
-    st.subheader("ATS Compatibility Score")
+    st.subheader("🎯 ATS Compatibility Score")
 
-    st.metric(
-        label="Overall Score",
-        value=f"{result.score}/100"
-    )
-
-    st.progress(
-        min(max(result.score, 0), 100) / 100
+    score_col1, score_col2 = st.columns(
+        [1, 3]
     )
 
 
-    # Three-column summary
+    with score_col1:
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.subheader("✅ Strengths")
-
-        for item in result.strengths:
-
-            st.write(f"• {item}")
+        st.metric(
+            "ATS Score",
+            f"{result.score}/100"
+        )
 
 
-    with col2:
+    with score_col2:
 
-        st.subheader("⚠️ Missing Skills")
-
-        for item in result.missing_skills:
-
-            st.write(f"• {item}")
-
-
-    with col3:
-
-        st.subheader("🔍 Weaknesses")
-
-        for item in result.weaknesses:
-
-            st.write(f"• {item}")
-
-
-    st.divider()
-
-
-    # Improvements
-
-    st.subheader("💡 Recommended Improvements")
-
-    for index, item in enumerate(
-        result.improvements,
-        start=1
-    ):
-
-        st.write(
-            f"**{index}.** {item}"
+        st.progress(
+            result.score / 100
         )
 
 
     st.divider()
 
 
-    # Improved bullets
+    # =====================================================
+    # STRENGTHS / MISSING SKILLS / WEAKNESSES
+    # =====================================================
 
-    st.subheader("✍️ Improved Resume Bullets")
+    col1, col2, col3 = st.columns(3)
 
-    for bullet in result.improved_bullets:
 
-        st.info(bullet)
+    # -----------------------------------------------------
+    # Strengths
+    # -----------------------------------------------------
+
+    with col1:
+
+        st.subheader("✅ Strengths")
+
+        if result.strengths:
+
+            for item in result.strengths:
+
+                st.success(
+                    f"• {item}"
+                )
+
+        else:
+
+            st.write(
+                "No major strengths identified."
+            )
+
+
+    # -----------------------------------------------------
+    # Missing skills
+    # -----------------------------------------------------
+
+    with col2:
+
+        st.subheader("⚠️ Missing Skills")
+
+        if result.missing_skills:
+
+            for item in result.missing_skills:
+
+                st.warning(
+                    f"• {item}"
+                )
+
+        else:
+
+            st.write(
+                "No major missing skills identified."
+            )
+
+
+    # -----------------------------------------------------
+    # Weaknesses
+    # -----------------------------------------------------
+
+    with col3:
+
+        st.subheader("🔍 Weaknesses")
+
+        if result.weaknesses:
+
+            for item in result.weaknesses:
+
+                st.error(
+                    f"• {item}"
+                )
+
+        else:
+
+            st.write(
+                "No major weaknesses identified."
+            )
 
 
     st.divider()
 
 
-    # Download JSON
+    # =====================================================
+    # IMPROVEMENTS
+    # =====================================================
+
+    st.subheader("💡 Recommended Improvements")
+
+    if result.improvements:
+
+        for index, item in enumerate(
+            result.improvements,
+            start=1
+        ):
+
+            st.write(
+                f"**{index}.** {item}"
+            )
+
+    else:
+
+        st.write(
+            "No specific improvements were generated."
+        )
+
+
+    st.divider()
+
+
+    # =====================================================
+    # IMPROVED BULLETS
+    # =====================================================
+
+    st.subheader("✍️ Improved Resume Bullets")
+
+    if result.improved_bullets:
+
+        for bullet in result.improved_bullets:
+
+            st.info(bullet)
+
+    else:
+
+        st.write(
+            "No improved bullet points were generated."
+        )
+
+
+    st.divider()
+
+
+    # =====================================================
+    # DOWNLOAD JSON
+    # =====================================================
+
+    st.subheader("📥 Export Analysis")
 
     result_json = json.dumps(
         result.model_dump(),
-        indent=2
+        indent=4
     )
 
     st.download_button(
         label="⬇️ Download Analysis as JSON",
         data=result_json,
         file_name="resume_analysis.json",
-        mime="application/json"
+        mime="application/json",
+        use_container_width=True
     )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "AI Resume Analyzer • Built with Python, Streamlit, "
+    "OpenRouter and Pydantic"
+)
