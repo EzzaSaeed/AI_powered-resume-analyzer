@@ -5,7 +5,6 @@ An AI-powered resume analysis tool that evaluates a candidate's resume against a
 
 The application uses LLM-powered analysis, prompt engineering, API integration, and structured JSON validation to turn an unstructured resume into a clear and useful improvement report.
 
----
 
 🚀 Project Overview
 
@@ -22,7 +21,7 @@ The AI Resume Analyzer solves this problem by allowing users to:
 7. Generate improved versions of resume bullet points.
 8. Download the analysis as a JSON file.
 
----
+
 
 ✨ Features
 
@@ -40,7 +39,7 @@ The AI Resume Analyzer solves this problem by allowing users to:
 - ⬇️ Downloadable analysis
 - 🔐 API key stored securely using environment variables
 
----
+
 
 🧠 AI Workflow
 
