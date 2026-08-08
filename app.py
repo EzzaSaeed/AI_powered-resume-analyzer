@@ -147,9 +147,26 @@ Return the result according to the required structured schema.
 
         content = response.choices[0].message.content
 
-        data = json.loads(content)
+if not content:
+    raise ValueError("The AI returned an empty response.")
 
-        return ResumeAnalysis.model_validate(data)
+content = content.strip()
+
+# Remove markdown code fences if the model adds them
+if content.startswith("```json"):
+    content = content[7:]
+
+if content.startswith("```"):
+    content = content[3:]
+
+if content.endswith("```"):
+    content = content[:-3]
+
+content = content.strip()
+
+data = json.loads(content)
+
+return ResumeAnalysis.model_validate(data)
 
     except Exception as e:
 
